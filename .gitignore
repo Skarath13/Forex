@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Output files
+*.png
+*.csv
+
+# Config with sensitive data
+config.ini.local
+
+# OS
+.DS_Store
+Thumbs.db
