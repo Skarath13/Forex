@@ -258,10 +258,10 @@ class AdaptiveStrategy:
             if analysis['market_structure']['trend_strength'] > 0.7:
                 timeframe_regimes[timeframe] = MarketRegime.TRENDING
             # Check for ranging market
-            elif analysis['bb_width'][-1] < analysis['bb_width'][-20:].mean() * 0.8:
+            elif analysis['bb_width'][.iloc-1] < analysis['bb_width'][.iloc-20:].mean() * 0.8:
                 timeframe_regimes[timeframe] = MarketRegime.RANGING
             # Check for volatile market
-            elif analysis['atr'][-1] > analysis['atr'][-20:].mean() * 1.5:
+            elif analysis['atr'][.iloc-1] > analysis['atr'][.iloc-20:].mean() * 1.5:
                 timeframe_regimes[timeframe] = MarketRegime.VOLATILE
             else:
                 timeframe_regimes[timeframe] = MarketRegime.UNDEFINED
@@ -596,18 +596,18 @@ class AdaptiveStrategy:
             signal['reason'].append(f"Bearish trend on {confirm_tf}")
             
         # Check MACD
-        if primary['macd'][-1] > primary['macd_signal'][-1] and primary['macd_histogram'][-1] > 0:
+        if primary['macd'][.iloc-1] > primary['macd_signal'][.iloc-1] and primary['macd_histogram'][.iloc-1] > 0:
             bullish_signals += 1
             signal['reason'].append(f"Bullish MACD on {primary_tf}")
-        elif primary['macd'][-1] < primary['macd_signal'][-1] and primary['macd_histogram'][-1] < 0:
+        elif primary['macd'][.iloc-1] < primary['macd_signal'][.iloc-1] and primary['macd_histogram'][.iloc-1] < 0:
             bearish_signals += 1
             signal['reason'].append(f"Bearish MACD on {primary_tf}")
             
         # Check RSI direction
-        if primary['rsi'][-1] > primary['rsi'][-2] and primary['rsi'][-1] > 50:
+        if primary['rsi'][.iloc-1] > primary['rsi'][.iloc-2] and primary['rsi'][.iloc-1] > 50:
             bullish_signals += 1
             signal['reason'].append(f"Rising RSI above 50 on {primary_tf}")
-        elif primary['rsi'][-1] < primary['rsi'][-2] and primary['rsi'][-1] < 50:
+        elif primary['rsi'][.iloc-1] < primary['rsi'][.iloc-2] and primary['rsi'][.iloc-1] < 50:
             bearish_signals += 1
             signal['reason'].append(f"Falling RSI below 50 on {primary_tf}")
             
@@ -641,7 +641,7 @@ class AdaptiveStrategy:
                     instrument, 
                     TradeDirection.LONG, 
                     last_price, 
-                    primary['atr'][-1]
+                    primary['atr'][.iloc-1]
                 )
                 signal['take_profit'] = self._calculate_take_profit(
                     instrument,
@@ -662,7 +662,7 @@ class AdaptiveStrategy:
                     instrument, 
                     TradeDirection.SHORT, 
                     last_price, 
-                    primary['atr'][-1]
+                    primary['atr'][.iloc-1]
                 )
                 signal['take_profit'] = self._calculate_take_profit(
                     instrument,
@@ -754,15 +754,15 @@ class AdaptiveStrategy:
                         signal['take_profit'] = last_price - (nearest_resistance - last_price) * 2
         
         # Check if RSI is in extreme zones (oversold/overbought)
-        if primary['rsi'][-1] < self.config['rsi_oversold']:
+        if primary['rsi'][.iloc-1] < self.config['rsi_oversold']:
             # Strengthen or create bullish signal
             if signal['direction'] == TradeDirection.LONG:
                 signal['strength'] = min(signal['strength'] + 0.2, 1.0)
-                signal['reason'].append(f"Oversold RSI: {primary['rsi'][-1]}")
+                signal['reason'].append(f"Oversold RSI: {primary['rsi'][.iloc-1]}")
             elif signal['direction'] == TradeDirection.NEUTRAL:
                 signal['direction'] = TradeDirection.LONG
                 signal['strength'] = 0.6
-                signal['reason'].append(f"Oversold RSI: {primary['rsi'][-1]}")
+                signal['reason'].append(f"Oversold RSI: {primary['rsi'][.iloc-1]}")
                 
                 # Calculate entry, stop and take profit if not already set
                 if signal['entry_price'] is None:
@@ -772,15 +772,15 @@ class AdaptiveStrategy:
                         signal['stop_loss'] = last_price * 0.99  # 1% stop
                         signal['take_profit'] = last_price * 1.02  # 2% target
                         
-        elif primary['rsi'][-1] > self.config['rsi_overbought']:
+        elif primary['rsi'][.iloc-1] > self.config['rsi_overbought']:
             # Strengthen or create bearish signal
             if signal['direction'] == TradeDirection.SHORT:
                 signal['strength'] = min(signal['strength'] + 0.2, 1.0)
-                signal['reason'].append(f"Overbought RSI: {primary['rsi'][-1]}")
+                signal['reason'].append(f"Overbought RSI: {primary['rsi'][.iloc-1]}")
             elif signal['direction'] == TradeDirection.NEUTRAL:
                 signal['direction'] = TradeDirection.SHORT
                 signal['strength'] = 0.6
-                signal['reason'].append(f"Overbought RSI: {primary['rsi'][-1]}")
+                signal['reason'].append(f"Overbought RSI: {primary['rsi'][.iloc-1]}")
                 
                 # Calculate entry, stop and take profit if not already set
                 if signal['entry_price'] is None:
@@ -791,11 +791,11 @@ class AdaptiveStrategy:
                         signal['take_profit'] = last_price * 0.98  # 2% target
                         
         # Check if price is testing Bollinger Bands
-        if primary['bb_lower'][-1] is not None and primary['bb_upper'][-1] is not None:
+        if primary['bb_lower'][.iloc-1] is not None and primary['bb_upper'][.iloc-1] is not None:
             last_price = self._get_last_price(instrument)
             if last_price:
                 # Bullish signal if price is near lower band
-                if last_price <= primary['bb_lower'][-1] * 1.001:
+                if last_price <= primary['bb_lower'][.iloc-1] * 1.001:
                     if signal['direction'] in [TradeDirection.LONG, TradeDirection.NEUTRAL]:
                         signal['direction'] = TradeDirection.LONG
                         signal['strength'] = max(signal['strength'], 0.7)
@@ -803,10 +803,10 @@ class AdaptiveStrategy:
                         if signal['entry_price'] is None:
                             signal['entry_price'] = last_price
                             signal['stop_loss'] = last_price * 0.99
-                            signal['take_profit'] = primary['bb_middle'][-1]
+                            signal['take_profit'] = primary['bb_middle'][.iloc-1]
                 
                 # Bearish signal if price is near upper band
-                elif last_price >= primary['bb_upper'][-1] * 0.999:
+                elif last_price >= primary['bb_upper'][.iloc-1] * 0.999:
                     if signal['direction'] in [TradeDirection.SHORT, TradeDirection.NEUTRAL]:
                         signal['direction'] = TradeDirection.SHORT
                         signal['strength'] = max(signal['strength'], 0.7)
@@ -814,7 +814,7 @@ class AdaptiveStrategy:
                         if signal['entry_price'] is None:
                             signal['entry_price'] = last_price
                             signal['stop_loss'] = last_price * 1.01
-                            signal['take_profit'] = primary['bb_middle'][-1]
+                            signal['take_profit'] = primary['bb_middle'][.iloc-1]
             
         return signal
     
@@ -870,30 +870,30 @@ class AdaptiveStrategy:
                 signal['reason'].append(f"Bearish divergence in volatile market")
                 
         # Check for oversold/overbought conditions with reversal signs
-        if primary['rsi'][-1] < 30 and primary['rsi'][-1] > primary['rsi'][-2]:
+        if primary['rsi'][.iloc-1] < 30 and primary['rsi'][.iloc-1] > primary['rsi'][.iloc-2]:
             bullish_signals += 1
-            signal['reason'].append(f"Oversold RSI with uptick: {primary['rsi'][-1]:.2f}")
-        elif primary['rsi'][-1] > 70 and primary['rsi'][-1] < primary['rsi'][-2]:
+            signal['reason'].append(f"Oversold RSI with uptick: {primary['rsi'][.iloc-1]:.2f}")
+        elif primary['rsi'][.iloc-1] > 70 and primary['rsi'][.iloc-1] < primary['rsi'][.iloc-2]:
             bearish_signals += 1
-            signal['reason'].append(f"Overbought RSI with downtick: {primary['rsi'][-1]:.2f}")
+            signal['reason'].append(f"Overbought RSI with downtick: {primary['rsi'][.iloc-1]:.2f}")
             
         # Check for Bollinger Band squeeze followed by breakout (volatility expansion)
-        if primary['bb_width'][-1] > primary['bb_width'][-2] * 1.1 and primary['bb_width'][-2] < primary['bb_width'][-20:].mean() * 0.8:
+        if primary['bb_width'][.iloc-1] > primary['bb_width'][.iloc-2] * 1.1 and primary['bb_width'][.iloc-2] < primary['bb_width'][.iloc-20:].mean() * 0.8:
             last_price = self._get_last_price(instrument)
             if last_price:
-                if last_price > primary['bb_upper'][-1]:
+                if last_price > primary['bb_upper'][.iloc-1]:
                     bullish_signals += 2
                     signal['reason'].append("Bollinger Band squeeze with upside breakout")
-                elif last_price < primary['bb_lower'][-1]:
+                elif last_price < primary['bb_lower'][.iloc-1]:
                     bearish_signals += 2
                     signal['reason'].append("Bollinger Band squeeze with downside breakout")
         
         # Check for strong MACD histogram expansion
-        if abs(primary['macd_histogram'][-1]) > abs(primary['macd_histogram'][-5:]).mean() * 1.5:
-            if primary['macd_histogram'][-1] > 0 and primary['macd_histogram'][-1] > primary['macd_histogram'][-2]:
+        if abs(primary['macd_histogram'][.iloc-1]) > abs(primary['macd_histogram'][.iloc-5:]).mean() * 1.5:
+            if primary['macd_histogram'][.iloc-1] > 0 and primary['macd_histogram'][.iloc-1] > primary['macd_histogram'][.iloc-2]:
                 bullish_signals += 1
                 signal['reason'].append("Strong MACD histogram expansion (bullish)")
-            elif primary['macd_histogram'][-1] < 0 and primary['macd_histogram'][-1] < primary['macd_histogram'][-2]:
+            elif primary['macd_histogram'][.iloc-1] < 0 and primary['macd_histogram'][.iloc-1] < primary['macd_histogram'][.iloc-2]:
                 bearish_signals += 1
                 signal['reason'].append("Strong MACD histogram expansion (bearish)")
                 
@@ -911,7 +911,7 @@ class AdaptiveStrategy:
                     instrument, 
                     TradeDirection.LONG, 
                     last_price, 
-                    primary['atr'][-1] * 1.5
+                    primary['atr'][.iloc-1] * 1.5
                 )
                 # Tighter take profit in volatile markets (1:1 risk-reward initially)
                 risk = last_price - signal['stop_loss']
@@ -930,7 +930,7 @@ class AdaptiveStrategy:
                     instrument, 
                     TradeDirection.SHORT, 
                     last_price, 
-                    primary['atr'][-1] * 1.5
+                    primary['atr'][.iloc-1] * 1.5
                 )
                 # Tighter take profit in volatile markets (1:1 risk-reward initially)
                 risk = signal['stop_loss'] - last_price
