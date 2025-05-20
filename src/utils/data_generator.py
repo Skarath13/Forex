@@ -180,15 +180,15 @@ def generate_forex_data(instrument, start_date, end_date, timeframe='1H', volati
     
     return df
 
-def generate_multi_timeframe_data(instrument, start_date, end_date, timeframes=['1H', '4H', 'D']):
+def generate_multi_timeframe_data(instrument, start_date, end_date, timeframes=['1H', '4H', 'D', 'W', 'M']):
     """
-    Generate data for multiple timeframes
+    Generate data for multiple timeframes including weekly and monthly
     
     Args:
         instrument: Trading instrument symbol
         start_date: Start date for data generation
         end_date: End date for data generation
-        timeframes: List of timeframes to generate
+        timeframes: List of timeframes to generate (supported: minutes, hours, days, weeks, months)
         
     Returns:
         Dictionary with data for each timeframe
@@ -198,36 +198,63 @@ def generate_multi_timeframe_data(instrument, start_date, end_date, timeframes=[
     # Generate the smallest timeframe first
     smallest_tf = min(timeframes, key=lambda x: _get_timeframe_minutes(x))
     
-    # For accurate resampling, start earlier
-    buffer_days = 10
+    # Add appropriate buffer for accurate resampling
+    # For weekly/monthly data, we need more history
+    has_weekly = 'W' in timeframes
+    has_monthly = 'M' in timeframes
+    
+    if has_monthly:
+        # For monthly data, buffer at least 60 days to ensure complete months
+        buffer_days = 60
+    elif has_weekly:
+        # For weekly data, buffer at least 14 days to ensure complete weeks
+        buffer_days = 14
+    else:
+        # For daily and intraday data, buffer 10 days
+        buffer_days = 10
+        
     adjusted_start = pd.to_datetime(start_date) - timedelta(days=buffer_days)
+    
+    # Generate base data (hourly or smaller timeframe)
+    base_tf = '1H'  # Use 1H as base for all timeframes for consistency
+    
+    # If smallest_tf is smaller than 1H, use that instead
+    if _get_timeframe_minutes(smallest_tf) < _get_timeframe_minutes(base_tf):
+        base_tf = smallest_tf
     
     # Generate base data
     base_data = generate_forex_data(
         instrument, 
         adjusted_start, 
         end_date, 
-        timeframe=smallest_tf
+        timeframe=base_tf
     )
     
-    # Store the smallest timeframe
-    result[smallest_tf] = base_data.loc[pd.to_datetime(start_date):]
+    # Store the base timeframe
+    result[base_tf] = base_data.loc[pd.to_datetime(start_date):]
     
-    # Resample for other timeframes
+    # Process all requested timeframes
     for tf in timeframes:
-        if tf == smallest_tf:
+        # Skip if already processed
+        if tf == base_tf:
             continue
             
+        # Map timeframe to pandas resample frequency
         if tf == 'D':
-            freq = 'D'
+            freq = 'D'  # Daily
+        elif tf == 'W':
+            freq = 'W-FRI'  # Weekly, ending on Friday (forex week)
+        elif tf == 'M':
+            freq = 'M'  # Monthly, ending on last day of month
         elif tf.endswith('H'):
-            freq = f"{tf[:-1]}H"
-        elif tf.endswith('M'):
-            freq = f"{tf[:-1]}min"
+            freq = f"{tf[:-1]}H"  # Hourly (e.g., '4H')
+        elif tf.endswith('M') and not tf == 'M':
+            freq = f"{tf[:-1]}min"  # Minutes (e.g., '15M')
         else:
-            continue  # Skip unknown timeframes
+            print(f"Warning: Unknown timeframe {tf}, skipping")
+            continue
         
-        # Resample
+        # Resample data from base timeframe to target timeframe
         resampled = base_data.resample(freq).agg({
             'open': 'first',
             'high': 'max',
@@ -236,42 +263,63 @@ def generate_multi_timeframe_data(instrument, start_date, end_date, timeframes=[
             'volume': 'sum'
         })
         
-        # Store resampled data
-        result[tf] = resampled.loc[pd.to_datetime(start_date):]
+        # Filter NaN values which can occur at the beginning of the series
+        resampled = resampled.dropna()
+        
+        # Store resampled data, starting from the requested start date
+        result[tf] = resampled.loc[resampled.index >= pd.to_datetime(start_date)]
     
     return result
 
 def _get_timeframe_minutes(timeframe):
     """Convert timeframe to minutes for comparison"""
-    if timeframe.endswith('M'):
+    if timeframe.endswith('M') and not timeframe == 'M':  # Minutes, not Month
         return int(timeframe[:-1])
     elif timeframe.endswith('H'):
         return int(timeframe[:-1]) * 60
     elif timeframe == 'D':
-        return 1440  # 24 hours
+        return 1440  # 24 hours = 1440 minutes
+    elif timeframe == 'W':
+        return 1440 * 7  # 1 week = 7 days = 10080 minutes
+    elif timeframe == 'M':
+        return 1440 * 30  # Approximate 1 month = 30 days = 43200 minutes
     return 60  # Default to 1H
 
 def generate_test_market_data(instruments=['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'], 
-                             timeframes=['1H', '4H', 'D'],
-                             days=100):
+                             timeframes=['1H', '4H', 'D', 'W', 'M'],
+                             days=365):  # Increased default to 365 days to ensure enough data for monthly timeframe
     """
-    Generate test market data for multiple instruments and timeframes
+    Generate test market data for multiple instruments and timeframes including weekly and monthly
     
     Args:
         instruments: List of instruments
-        timeframes: List of timeframes
-        days: Number of days of data
+        timeframes: List of timeframes (supports '1H', '4H', 'D', 'W', 'M')
+        days: Number of days of data (recommended 365+ for monthly data)
         
     Returns:
         Dictionary of market data for backtesting
     """
     end_date = datetime.now()
+    
+    # Ensure enough history for monthly data if requested
+    has_monthly = 'M' in timeframes
+    has_weekly = 'W' in timeframes
+    
+    # Adjust the start date based on the largest timeframe
+    if has_monthly and days < 365:
+        print(f"Warning: Increasing days from {days} to 365 to accommodate monthly timeframe")
+        days = 365
+    elif has_weekly and days < 90:
+        print(f"Warning: Increasing days from {days} to 90 to accommodate weekly timeframe")
+        days = 90
+    
     start_date = end_date - timedelta(days=days)
     
     market_data = {}
     correlation_data = {}
     
     for instrument in instruments:
+        # Generate data for all requested timeframes
         instrument_data = generate_multi_timeframe_data(
             instrument, 
             start_date, 
@@ -284,14 +332,19 @@ def generate_test_market_data(instruments=['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD
         if 'D' in timeframes:
             correlation_data[instrument] = instrument_data['D']
         else:
-            # Resample to daily if daily not provided
-            correlation_data[instrument] = instrument_data[timeframes[0]].resample('D').agg({
+            # If daily not available, get closest timeframe and resample
+            closest_tf = min([tf for tf in timeframes if _get_timeframe_minutes(tf) <= 1440], 
+                           key=lambda x: 1440 - _get_timeframe_minutes(x), 
+                           default=timeframes[0])
+            
+            # Resample to daily
+            correlation_data[instrument] = instrument_data[closest_tf].resample('D').agg({
                 'open': 'first',
                 'high': 'max',
                 'low': 'min',
                 'close': 'last',
                 'volume': 'sum'
-            })
+            }).dropna()
     
     # Add correlation data to market_data
     market_data['correlation_data'] = correlation_data

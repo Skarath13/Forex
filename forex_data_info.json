@@ -1,0 +1,163 @@
+{
+  "instruments": [
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "AUDUSD"
+  ],
+  "timeframes": [
+    "1H",
+    "4H",
+    "D"
+  ],
+  "date_range": {
+    "EURUSD": {
+      "1H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "4H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "D": {
+        "start": "unknown",
+        "end": "unknown"
+      }
+    },
+    "GBPUSD": {
+      "1H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "4H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "D": {
+        "start": "unknown",
+        "end": "unknown"
+      }
+    },
+    "USDJPY": {
+      "1H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "4H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "D": {
+        "start": "unknown",
+        "end": "unknown"
+      }
+    },
+    "AUDUSD": {
+      "1H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "4H": {
+        "start": "unknown",
+        "end": "unknown"
+      },
+      "D": {
+        "start": "unknown",
+        "end": "unknown"
+      }
+    }
+  },
+  "bars_count": {
+    "EURUSD": {
+      "1H": 3014,
+      "4H": 766,
+      "D": 128
+    },
+    "GBPUSD": {
+      "1H": 3014,
+      "4H": 765,
+      "D": 128
+    },
+    "USDJPY": {
+      "1H": 3001,
+      "4H": 765,
+      "D": 128
+    },
+    "AUDUSD": {
+      "1H": 3048,
+      "4H": 771,
+      "D": 128
+    }
+  },
+  "price_range": {
+    "EURUSD": {
+      "1H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "4H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "D": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      }
+    },
+    "GBPUSD": {
+      "1H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "4H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "D": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      }
+    },
+    "USDJPY": {
+      "1H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "4H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "D": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      }
+    },
+    "AUDUSD": {
+      "1H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "4H": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      },
+      "D": {
+        "min": 0.0,
+        "max": 0.0,
+        "avg": 0.0
+      }
+    }
+  }
+}
