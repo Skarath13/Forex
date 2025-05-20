@@ -1,83 +1,138 @@
-# CLAUDE.md - Forex Trading Strategy Project
+# Forex Trading System Maintenance Guidelines
 
-## Project Overview
-This is an adaptive forex trading strategy system that analyzes market conditions and generates trading signals based on different market regimes. The system uses technical indicators, risk management, and multi-timeframe analysis to make trading decisions.
-
-## Running the Project
-
-### Prerequisites
-- Python 3.7+
-- Required dependencies (install using `pip3 install -r requirements.txt`):
-  - numpy
-  - pandas
-  - matplotlib
-  - seaborn
-  - yfinance
-  - pandas-datareader
-  - reportlab
-  - lxml
-
-### Commands
-To run the strategy with generated sample data:
-```
-python3 -m src.main
-```
-
-To run the strategy with real historical forex data from Yahoo Finance:
-```
-python3 run_with_real_data.py
-```
+This document provides maintenance guidelines for the Forex trading system with enhanced order flow analysis.
 
 ## Code Structure
-- `src/main.py`: Entry point that runs the strategy with sample data
-- `run_with_real_data.py`: Script to run strategy with real historical data
-- `src/strategies/adaptive_strategy.py`: Core strategy implementation with market regime detection
-- `src/utils/`: Utility modules
-  - `indicators.py`: Technical indicator calculations
-  - `risk_management.py`: Risk management functions
-  - `market_analysis.py`: Market analysis utilities
-  - `data_fetcher.py`: Module to fetch real historical forex data
-  - `report_generator.py`: Module to generate detailed PDF reports
 
-## Features
-- Multi-timeframe analysis (1H, 4H, D)
-- Market regime detection (Trending, Ranging, Volatile)
-- Real-time signal generation based on current market conditions
-- Comprehensive risk management
-- Historical data backtesting
-- Performance metrics and analysis
-- PDF report generation
-- Real market data from Yahoo Finance
+The system is organized as follows:
 
-## Data Sources
-- Generated sample data (default)
-- Real historical forex data from Yahoo Finance
-- Supported forex pairs:
-  - EUR/USD, GBP/USD, USD/JPY, AUD/USD (default)
-  - Also supports: USD/CHF, NZD/USD, USD/CAD, EUR/JPY, GBP/JPY, EUR/GBP
-
-## Maintenance Notes
-1. There are FutureWarnings in pandas code that should be addressed:
-   - Use `.iloc[]` instead of list index notation for Series objects
-   - Update lines in adaptive_strategy.py that use indexing like `analysis['bb_width'][-1]`
-
-2. Yahoo Finance API limitations:
-   - The free API may have rate limits and data availability constraints
-   - Data might not be available for very recent timeframes (especially intraday)
-   - The API could change without notice, requiring updates to the data_fetcher.py module
-
-## Development Tasks
-- Fix pandas FutureWarnings
-- Add unit tests for strategy components
-- Implement additional data sources
-- Improve visualization with more detailed plots
-- Add machine learning predictions for market direction
-
-## Notes for Claude
-When asked to run the project, use:
 ```
-python3 -m src.main                # For sample data
-python3 run_with_real_data.py      # For real historical data
+/Forex
+  ├── src/
+  │   ├── strategies/
+  │   │   └── adaptive_strategy.py  # Core strategy implementation
+  │   ├── utils/
+  │   │   ├── indicators.py         # Technical indicators
+  │   │   ├── risk_management.py    # Risk management utilities
+  │   │   ├── market_analysis.py    # Market analysis and order flow detection
+  │   │   ├── visualization.py      # Order flow visualization tools
+  │   │   ├── data_generator.py     # Data generation for testing
+  │   │   ├── data_fetcher.py       # Fetches real market data
+  │   │   └── report_generator.py   # Generates performance reports
+  │   ├── data/                     # Data storage
+  │   └── main.py                   # Main entry point for running the strategy
+  ├── examples/                     # Example scripts and visualizations
+  │   └── images/                   # Example visualization images
+  ├── docs/                         # Documentation
+  │   └── order_flow_analysis.md    # Order flow analysis documentation
+  ├── test_strategy.py              # Strategy testing script
+  ├── backtest_with_order_flow.py   # Backtest with order flow analysis
+  ├── real_order_flow_analysis.py   # Real order flow analysis script
+  ├── simulate_order_flow_profit.py # Order flow profit simulation
+  ├── requirements.txt              # Project dependencies
+  └── README.md                     # Project overview
 ```
 
-To fix FutureWarnings, replace Series index syntax like `series[-1]` with `series.iloc[-1]`.
+## Maintenance Tasks
+
+### Regular Maintenance
+
+1. **Update pandas deprecation warnings**:
+   - Fix `Series.__getitem__` warnings in `adaptive_strategy.py`
+   - Update frequency parameters in `data_generator.py` ('H' → 'h', 'M' → 'ME')
+
+2. **Order Flow Analysis Enhancements**:
+   - Expand pattern recognition to include more institutional patterns
+   - Refine confidence scoring algorithm for better accuracy
+   - Add more real-world institutional scenarios
+
+3. **Data Quality Improvements**:
+   - Improve synthetic volume generation to better approximate real market behavior
+   - Add more robust handling for missing or inconsistent data
+   - Implement more sophisticated time-weighted volume calculations
+
+4. **Visualization Enhancements**:
+   - Add interactive visualization options
+   - Improve layout handling to fix tight_layout warnings
+   - Add multi-timeframe correlation displays
+
+### Future Development Areas
+
+1. **Real-time Order Flow Analysis**:
+   - Implement real-time data feeds with volume information
+   - Develop streaming order flow detection
+   - Create alerts for significant institutional activity
+
+2. **Machine Learning Integration**:
+   - Train models to identify institutional patterns more accurately
+   - Incorporate sentiment analysis from financial news
+   - Develop adaptive thresholds based on market conditions
+
+3. **Performance Optimization**:
+   - Optimize pattern detection algorithms for better performance
+   - Implement more efficient data handling for large datasets
+   - Add parallel processing for multi-instrument analysis
+
+4. **Additional Features**:
+   - Implement DOM (Depth of Market) analysis when data is available
+   - Add market breadth indicators for broader context
+   - Develop intermarket analysis capabilities
+
+## Maintenance Commands
+
+- **Run tests**: `python test_strategy.py`
+- **Run backtest**: `python backtest_with_order_flow.py`
+- **Run order flow simulation**: `python simulate_order_flow_profit.py`
+- **Real data analysis**: `python real_order_flow_analysis.py`
+
+## Handling Warnings
+
+When running the system, you may encounter the following warnings that should be addressed in future updates:
+
+1. `Series.__getitem__ treating keys as positions is deprecated` in `adaptive_strategy.py`:
+   - Replace with `.iloc[pos]` for positional indexing
+   - For example: `analysis['bb_width'][-1]` → `analysis['bb_width'].iloc[-1]`
+
+2. `'H' is deprecated and will be removed in a future version, please use 'h' instead` in `data_generator.py`:
+   - Update frequency strings from 'H' to 'h' for hour frequency
+   - Update frequency strings from 'M' to 'ME' for month end frequency
+
+3. `This figure includes Axes that are not compatible with tight_layout` in `visualization.py`:
+   - Reorganize subplot structure to be compatible with tight_layout
+   - Consider using GridSpec for more complex layouts
+
+## Configuration Recommendations
+
+For optimal order flow analysis, use the following configuration:
+
+```python
+strategy_config = {
+    # Order flow parameters
+    'use_volume_profile': True,        # Enable volume profile analysis
+    'use_order_flow': True,            # Enable order flow analysis
+    'institutional_confidence_threshold': 0.7,  # Min confidence for institutional signals
+    
+    # Timeframe configuration
+    'primary_timeframe': 'D',          # Daily timeframe for trading
+    'trend_timeframes': ['W', 'M'],    # Use weekly and monthly for trend context
+}
+```
+
+## Performance Monitoring
+
+Regularly monitor the following performance metrics:
+
+1. **Win rate comparison**: Compare win rates with and without order flow analysis
+2. **Performance by market phase**: Special attention to distribution and volatile phases
+3. **Profit factor**: Should show significant improvement with order flow analysis
+4. **Drawdown reduction**: Order flow analysis should reduce drawdowns
+
+## Adding New Institutional Patterns
+
+When adding new institutional patterns to `market_analysis.py`:
+
+1. Define the pattern criteria clearly
+2. Assign appropriate confidence levels
+3. Document the pattern in the order_flow_analysis.md file
+4. Add example visualizations to the examples/images directory
+5. Test across different market conditions
