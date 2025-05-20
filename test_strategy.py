@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from src.strategies.adaptive_strategy import AdaptiveStrategy, MarketRegime, TradeDirection
 from src.utils.data_generator import generate_test_market_data
+from src.utils.market_analysis import analyze_order_flow, calculate_volume_profile
+from src.utils.visualization import plot_order_flow_analysis, plot_volume_profile
 
 def run_strategy_test():
     """
@@ -108,5 +110,71 @@ def run_strategy_test():
     
     print("\nTest complete!")
 
+def test_order_flow_analysis():
+    """
+    Test the enhanced order flow analysis functionality
+    """
+    print("\nTesting enhanced order flow analysis...")
+    
+    # Generate test data for a single instrument
+    market_data = generate_test_market_data(
+        instruments=['EURUSD'],
+        timeframes=['1H', '4H', 'D'],
+        days=60
+    )
+    
+    # Get daily data for analysis
+    daily_data = market_data['EURUSD']['D']
+    
+    # Run order flow analysis
+    order_flow_results = analyze_order_flow(daily_data)
+    volume_profile_results = calculate_volume_profile(daily_data)
+    
+    # Check for institutional activity
+    inst_activity = order_flow_results['institutional_activity']
+    print("\nOrder Flow Analysis Results:")
+    
+    if inst_activity['present']:
+        print(f"Institutional Activity: {inst_activity['type'].upper()} with {inst_activity['confidence']:.2f} confidence")
+        print("\nDetected patterns:")
+        for signal in inst_activity['signals']:
+            print(f"- {signal['type'].replace('_', ' ').title()}: {signal['description']}")
+    else:
+        print("No clear institutional activity detected")
+    
+    # Print key metrics
+    print("\nKey Metrics:")
+    print(f"Buying Pressure: {order_flow_results['buying_pressure']:.4f}")
+    print(f"Selling Pressure: {order_flow_results['selling_pressure']:.4f}")
+    print(f"Imbalance: {order_flow_results['imbalance']:.4f} (positive = buying, negative = selling)")
+    print(f"Recent Delta: {order_flow_results['delta']['recent']:.2f}")
+    print(f"Cumulative Delta: {order_flow_results['delta']['cumulative']:.2f}")
+    
+    # Create visualizations
+    fig1 = plot_order_flow_analysis(daily_data, order_flow_results, 
+                                  title="EURUSD Daily Order Flow Analysis")
+    fig2 = plot_volume_profile(daily_data, volume_profile_results)
+    
+    plt.figure(fig1.number)
+    plt.savefig('order_flow_analysis_test.png')
+    plt.close(fig1)
+    
+    plt.figure(fig2.number)
+    plt.savefig('volume_profile_test.png')
+    plt.close(fig2)
+    
+    print("\nOrder flow visualizations saved to 'order_flow_analysis_test.png' and 'volume_profile_test.png'")
+    print("Enhanced order flow analysis test complete!")
+
 if __name__ == "__main__":
-    run_strategy_test()
+    # Choose which test to run
+    print("Choose a test to run:")
+    print("1. Run strategy test")
+    print("2. Test order flow analysis")
+    
+    choice = input("Enter choice (1-2): ")
+    
+    if choice == '2':
+        test_order_flow_analysis()
+    else:
+        run_strategy_test()

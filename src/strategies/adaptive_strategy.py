@@ -32,8 +32,12 @@ class AdaptiveStrategy:
     def __init__(self, config=None):
         # Default configuration
         self.default_config = {
-            # Timeframes to analyze
-            'timeframes': ['1H', '4H', 'D'],
+            # Timeframes to analyze (now includes weekly and monthly)
+            'timeframes': ['1H', '4H', 'D', 'W', 'M'],
+            # Timeframe configuration - Trade ONLY on daily, use weekly/monthly just for context
+            'primary_timeframe': 'D',    # Primary for entry signals (ONLY timeframe we'll trade on)
+            'trend_timeframes': ['W', 'M'],  # For trend context only, not for trading
+            'confirmation_timeframe': 'D',  # Use daily for self-confirmation
             
             # Risk parameters
             'risk_per_trade': 0.01,  # 1% of account per trade
@@ -206,6 +210,42 @@ class AdaptiveStrategy:
         # Market structure analysis
         analysis['market_structure'] = analyze_market_structure(data)
         
+        # Candlestick pattern detection (new)
+        from src.utils.indicators import detect_candlestick_patterns
+        analysis['candlestick_patterns'] = detect_candlestick_patterns(data)
+        
+        # Only calculate volume profile and order flow for timeframes Daily or smaller
+        # These are computationally intensive and more relevant for shorter timeframes
+        if timeframe not in ['W', 'M']:
+            # Volume profile analysis (new)
+            from src.utils.market_analysis import calculate_volume_profile, analyze_order_flow
+            
+            # Only perform volume analysis if the data contains volume
+            if 'volume' in data.columns and data['volume'].sum() > 0:
+                # Volume profile for price levels
+                analysis['volume_profile'] = calculate_volume_profile(data)
+                
+                # Order flow analysis for momentum
+                analysis['order_flow'] = analyze_order_flow(data)
+        
+        # Perform long-term trend analysis for weekly and monthly timeframes
+        if timeframe in ['W', 'M'] and len(data) >= 10:
+            from src.utils.market_analysis import analyze_long_term_trends
+            
+            # For weekly timeframe, we may want to check against monthly if available
+            if timeframe == 'W':
+                # Try to get monthly data from cache
+                monthly_data = None
+                monthly_key = f"{instrument}_M"
+                if monthly_key in self.analysis_cache:
+                    monthly_data = self.analysis_cache[monthly_key]
+                    
+                analysis['long_term_trends'] = analyze_long_term_trends(data, None, monthly_data)
+            
+            # For monthly timeframe, we just analyze the data itself for long-term trends
+            elif timeframe == 'M':
+                analysis['long_term_trends'] = analyze_long_term_trends(None, None, data)
+        
         return analysis
     
     def _determine_market_regime(self, instrument, analysis_results):
@@ -235,6 +275,9 @@ class AdaptiveStrategy:
     def generate_signals(self, analysis_results):
         """
         Generate trading signals based on analysis results and current market regime
+        
+        Prioritizes daily timeframe for signal generation, with weekly and monthly
+        used for trend context and analysis
         
         Args:
             analysis_results: Dictionary of analysis results from analyze_markets
@@ -272,32 +315,86 @@ class AdaptiveStrategy:
                 signals[instrument] = signal
                 continue
             
-            # Get primary and confirmation timeframes
-            timeframes = sorted(self.config['timeframes'], key=lambda x: self._get_timeframe_minutes(x))
+            # Set timeframes based on configuration
+            primary_tf = self.config['primary_timeframe']  # Default to daily
+            confirm_tf = self.config['confirmation_timeframe']  # Default to 4h
+            trend_timeframes = self.config['trend_timeframes']  # Weekly and monthly
             
-            if len(timeframes) >= 2:
-                primary_tf = timeframes[-1]  # Largest timeframe
-                confirm_tf = timeframes[-2]  # Second largest timeframe
-            else:
-                primary_tf = timeframes[0]
-                confirm_tf = primary_tf
-                
-            # Check if we have data for both timeframes
-            if primary_tf not in analysis or confirm_tf not in analysis:
-                signal['reason'].append(f"Missing data for required timeframes")
-                signals[instrument] = signal
-                continue
-                
+            # Check if our preferred timeframes are available
+            if primary_tf not in analysis:
+                # Fall back to largest available timeframe
+                available_tfs = sorted([tf for tf in analysis.keys() 
+                                     if tf not in trend_timeframes],
+                                     key=lambda x: self._get_timeframe_minutes(x))
+                if available_tfs:
+                    primary_tf = available_tfs[-1]
+                    signal['reason'].append(f"Preferred primary timeframe not available, using {primary_tf}")
+                else:
+                    signal['reason'].append(f"No suitable timeframes available")
+                    signals[instrument] = signal
+                    continue
+            
+            if confirm_tf not in analysis:
+                # Fall back to second-largest available timeframe
+                available_tfs = sorted([tf for tf in analysis.keys() 
+                                      if tf != primary_tf and tf not in trend_timeframes],
+                                      key=lambda x: self._get_timeframe_minutes(x))
+                if available_tfs:
+                    confirm_tf = available_tfs[-1]
+                    signal['reason'].append(f"Preferred confirmation timeframe not available, using {confirm_tf}")
+                else:
+                    # If no confirmation timeframe is available, use primary as confirmation too
+                    confirm_tf = primary_tf
+                    signal['reason'].append(f"No confirmation timeframe available, using primary")
+            
+            # Check for trend alignment with higher timeframes
+            trend_aligned = self._check_trend_alignment(instrument, analysis, trend_timeframes, primary_tf)
+            
+            # Get long-term trend analysis if available
+            long_term_context = self._get_long_term_context(instrument, analysis, trend_timeframes)
+            
             # Apply regime-specific signal generation
             if self.current_regime == MarketRegime.TRENDING:
-                signal = self._generate_trend_following_signal(instrument, analysis, primary_tf, confirm_tf)
+                signal = self._generate_trend_following_signal(
+                    instrument, 
+                    analysis, 
+                    primary_tf, 
+                    confirm_tf,
+                    long_term_context
+                )
             elif self.current_regime == MarketRegime.RANGING:
-                signal = self._generate_range_trading_signal(instrument, analysis, primary_tf, confirm_tf)
+                signal = self._generate_range_trading_signal(
+                    instrument, 
+                    analysis, 
+                    primary_tf, 
+                    confirm_tf,
+                    long_term_context
+                )
             elif self.current_regime == MarketRegime.VOLATILE:
-                signal = self._generate_volatility_signal(instrument, analysis, primary_tf, confirm_tf)
+                signal = self._generate_volatility_signal(
+                    instrument, 
+                    analysis, 
+                    primary_tf, 
+                    confirm_tf,
+                    long_term_context
+                )
             else:
                 signal['reason'].append("Undefined market regime - no signal generated")
+            
+            # Add trend alignment information to signal
+            if trend_aligned:
+                signal['reason'].append("Signal aligned with higher timeframe trends")
+                signal['strength'] = min(signal['strength'] * 1.3, 1.0)  # Boost signal strength
+            else:
+                signal['reason'].append("Signal not aligned with higher timeframe trends")
+                signal['strength'] *= 0.7  # Reduce signal strength
                 
+            # ONLY allow trading on daily timeframe regardless of signal strength
+            if signal['timeframe'] != 'D':
+                signal['direction'] = TradeDirection.NEUTRAL
+                signal['strength'] = 0
+                signal['reason'].append("Signal ignored - only trading on daily timeframe")
+            
             # Calculate risk parameters if we have a directional signal
             if signal['direction'] != TradeDirection.NEUTRAL and signal['entry_price'] is not None:
                 # Calculate optimal position size
@@ -330,9 +427,140 @@ class AdaptiveStrategy:
             signals[instrument] = signal
                 
         return signals
+        
+    def _check_trend_alignment(self, instrument, analysis, trend_timeframes, primary_tf):
+        """Check alignment between primary timeframe and higher timeframes"""
+        if not trend_timeframes:
+            return True  # No higher timeframes to check
+            
+        # Get primary timeframe trend direction
+        if primary_tf not in analysis or 'market_structure' not in analysis[primary_tf]:
+            return False
+            
+        primary_trend = analysis[primary_tf]['market_structure'].get('trend_direction', 'undefined')
+        
+        # Count how many higher timeframes align with primary
+        aligned_count = 0
+        higher_tf_count = 0
+        
+        for tf in trend_timeframes:
+            if tf in analysis and 'market_structure' in analysis[tf]:
+                higher_tf_count += 1
+                higher_trend = analysis[tf]['market_structure'].get('trend_direction', 'undefined')
+                
+                if higher_trend == primary_trend and higher_trend != 'undefined':
+                    aligned_count += 1
+        
+        # Check also for long-term trend analysis if available
+        for tf in trend_timeframes:
+            tf_key = f"{instrument}_{tf}"
+            if tf_key in self.analysis_cache and 'long_term_trends' in self.analysis_cache[tf_key]:
+                higher_tf_count += 1
+                lt_trend = self.analysis_cache[tf_key]['long_term_trends'].get('direction', {}).get('direction', 'undefined')
+                
+                if lt_trend == primary_trend and lt_trend != 'undefined':
+                    aligned_count += 1
+        
+        # Return true if at least 50% of higher timeframes align with primary
+        return aligned_count >= (higher_tf_count / 2) if higher_tf_count > 0 else True
     
-    def _generate_trend_following_signal(self, instrument, analysis, primary_tf, confirm_tf):
-        """Generate signals for trending market conditions"""
+    def _get_long_term_context(self, instrument, analysis, trend_timeframes):
+        """Get context from higher timeframes"""
+        context = {
+            'trend_direction': 'undefined',
+            'trend_strength': 0,
+            'key_levels': {
+                'support': [],
+                'resistance': []
+            }
+        }
+        
+        # Check for higher timeframe analysis in cache
+        has_long_term_analysis = False
+        
+        # Extract trend information from weekly/monthly timeframes
+        for tf in trend_timeframes:
+            tf_key = f"{instrument}_{tf}"
+            
+            # First check if we have long-term trend analysis in the cache
+            if tf_key in self.analysis_cache and 'long_term_trends' in self.analysis_cache[tf_key]:
+                lt_trends = self.analysis_cache[tf_key]['long_term_trends']
+                
+                # Get direction and strength
+                direction = lt_trends.get(f'{tf.lower()}_trend', {}).get('direction', 'undefined')
+                strength = lt_trends.get(f'{tf.lower()}_trend', {}).get('strength', 0)
+                
+                # Only update if this timeframe has a defined direction and is stronger
+                if direction != 'undefined' and strength > context['trend_strength']:
+                    context['trend_direction'] = direction
+                    context['trend_strength'] = strength
+                
+                # Add support/resistance levels
+                for level in lt_trends.get('support_levels', []):
+                    context['key_levels']['support'].append({
+                        'price': level['price'],
+                        'strength': level['strength'],
+                        'source': level['source']
+                    })
+                
+                for level in lt_trends.get('resistance_levels', []):
+                    context['key_levels']['resistance'].append({
+                        'price': level['price'],
+                        'strength': level['strength'],
+                        'source': level['source']
+                    })
+                
+                has_long_term_analysis = True
+            
+            # If timeframe is available directly in current analysis, check it too
+            elif tf in analysis and 'market_structure' in analysis[tf]:
+                ms = analysis[tf]['market_structure']
+                direction = ms.get('trend_direction', 'undefined')
+                strength = ms.get('trend_strength', 0)
+                
+                # Only update if this is a stronger trend
+                if direction != 'undefined' and strength > context['trend_strength']:
+                    context['trend_direction'] = direction
+                    context['trend_strength'] = strength * 0.8  # Give slight preference to long-term trend analysis
+        
+        # If we don't have long-term analysis yet, use regular support/resistance
+        if not has_long_term_analysis and instrument in self.support_resistance_levels:
+            sr_levels = self.support_resistance_levels[instrument]
+            
+            # Add all support levels
+            if 'supports' in sr_levels:
+                for level in sr_levels['supports']:
+                    context['key_levels']['support'].append({
+                        'price': level,
+                        'strength': 0.5,  # Medium strength since we don't know the source
+                        'source': 'general'
+                    })
+            
+            # Add all resistance levels
+            if 'resistances' in sr_levels:
+                for level in sr_levels['resistances']:
+                    context['key_levels']['resistance'].append({
+                        'price': level,
+                        'strength': 0.5,  # Medium strength since we don't know the source
+                        'source': 'general'
+                    })
+        
+        return context
+    
+    def _generate_trend_following_signal(self, instrument, analysis, primary_tf, confirm_tf, long_term_context=None):
+        """
+        Generate signals for trending market conditions
+        
+        Args:
+            instrument: Trading instrument
+            analysis: Analysis results
+            primary_tf: Primary timeframe (typically daily)
+            confirm_tf: Confirmation timeframe (typically 4H)
+            long_term_context: Long-term trend context from weekly/monthly
+            
+        Returns:
+            Signal dictionary
+        """
         signal = {
             'direction': TradeDirection.NEUTRAL,
             'strength': 0,
@@ -445,8 +673,20 @@ class AdaptiveStrategy:
         
         return signal
         
-    def _generate_range_trading_signal(self, instrument, analysis, primary_tf, confirm_tf):
-        """Generate signals for ranging market conditions"""
+    def _generate_range_trading_signal(self, instrument, analysis, primary_tf, confirm_tf, long_term_context=None):
+        """
+        Generate signals for ranging market conditions
+        
+        Args:
+            instrument: Trading instrument
+            analysis: Analysis results
+            primary_tf: Primary timeframe (typically daily)
+            confirm_tf: Confirmation timeframe (typically 4H)
+            long_term_context: Long-term trend context from weekly/monthly
+            
+        Returns:
+            Signal dictionary
+        """
         signal = {
             'direction': TradeDirection.NEUTRAL,
             'strength': 0,
@@ -578,8 +818,20 @@ class AdaptiveStrategy:
             
         return signal
     
-    def _generate_volatility_signal(self, instrument, analysis, primary_tf, confirm_tf):
-        """Generate signals for volatile market conditions - more conservative approach"""
+    def _generate_volatility_signal(self, instrument, analysis, primary_tf, confirm_tf, long_term_context=None):
+        """
+        Generate signals for volatile market conditions - more conservative approach
+        
+        Args:
+            instrument: Trading instrument
+            analysis: Analysis results
+            primary_tf: Primary timeframe (typically daily)
+            confirm_tf: Confirmation timeframe (typically 4H)
+            long_term_context: Long-term trend context from weekly/monthly
+            
+        Returns:
+            Signal dictionary
+        """
         signal = {
             'direction': TradeDirection.NEUTRAL,
             'strength': 0,
@@ -996,12 +1248,16 @@ class AdaptiveStrategy:
     
     def _get_timeframe_minutes(self, timeframe):
         """Convert timeframe to minutes for comparison"""
-        if timeframe.endswith('m'):
+        if timeframe.endswith('m') or (timeframe.endswith('M') and timeframe != 'M'):
             return int(timeframe[:-1])
         elif timeframe.endswith('H') or timeframe.endswith('h'):
             return int(timeframe[:-1]) * 60
         elif timeframe.endswith('D') or timeframe.endswith('d'):
             return int(timeframe[:-1]) * 60 * 24
+        elif timeframe == 'W':
+            return 7 * 24 * 60  # 1 week = 7 days = 10080 minutes
+        elif timeframe == 'M':
+            return 30 * 24 * 60  # approximate 1 month = 30 days = 43200 minutes
         return 0
     
     def _is_cache_valid(self, cache_key):

@@ -37,6 +37,431 @@ def calculate_rsi(data, period=14):
     rsi = 100 - (100 / (1 + rs))
     
     return rsi
+    
+def detect_candlestick_patterns(data, min_trend_bars=5, volatility_filter=True, volume_filter=True, 
+                             min_pattern_size_pct=0.01, confirmation_required=True):
+    """
+    Detect common candlestick patterns in price data with advanced filtering
+    
+    Args:
+        data: DataFrame with OHLC price data
+        min_trend_bars: Minimum number of bars to confirm a trend before pattern
+        volatility_filter: Whether to apply volatility-based filtering
+        volume_filter: Whether to apply volume-based filtering
+        min_pattern_size_pct: Minimum pattern size as percentage of ATR (for relevance)
+        confirmation_required: Whether to require confirmation for patterns
+        
+    Returns:
+        Dictionary with detected patterns and their locations including metadata
+    """
+    # Ensure we have required data
+    if not all(col in data.columns for col in ['open', 'high', 'low', 'close']):
+        return {'bullish': [], 'bearish': []}
+    
+    # Initialize results
+    patterns = {
+        'bullish': [],
+        'bearish': []
+    }
+    
+    # Get number of candles
+    n = len(data)
+    
+    # Skip if we don't have enough data
+    if n < max(min_trend_bars + 3, 10):
+        return patterns
+    
+    # Extract price data
+    open_prices = data['open']
+    high_prices = data['high']
+    low_prices = data['low']
+    close_prices = data['close']
+    
+    # Calculate candle properties
+    candle_body = abs(close_prices - open_prices)
+    candle_range = high_prices - low_prices
+    body_size_pct = candle_body / candle_range  # Relative body size
+    
+    # True if bullish candle (close > open)
+    is_bullish = close_prices > open_prices
+    # True if bearish candle (close < open)
+    is_bearish = close_prices < open_prices
+    
+    # Calculate upper and lower shadows
+    upper_shadow = high_prices - np.maximum(close_prices, open_prices)
+    lower_shadow = np.minimum(close_prices, open_prices) - low_prices
+    
+    # Calculate ATR for volatility filter
+    def calculate_atr(periods=14):
+        tr1 = high_prices - low_prices
+        tr2 = abs(high_prices - close_prices.shift(1))
+        tr3 = abs(low_prices - close_prices.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return tr.rolling(window=periods).mean()
+    
+    atr = calculate_atr()
+    
+    # Calculate trend metrics for better pattern context
+    def is_in_uptrend(i, bars=min_trend_bars):
+        if i < bars:
+            return False
+        
+        # Simple moving average slope
+        window = min(bars, i)
+        sma = close_prices.iloc[i-window:i].mean()
+        return close_prices.iloc[i] > sma and close_prices.iloc[i-window:i].is_monotonic_increasing
+        
+    def is_in_downtrend(i, bars=min_trend_bars):
+        if i < bars:
+            return False
+        
+        # Simple moving average slope
+        window = min(bars, i)
+        sma = close_prices.iloc[i-window:i].mean()
+        return close_prices.iloc[i] < sma and close_prices.iloc[i-window:i].is_monotonic_decreasing
+    
+    # Calculate additional technical indicators for confirmation
+    if confirmation_required:
+        # Simple RSI implementation
+        def calculate_rsi(periods=14):
+            delta = close_prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+            rs = gain / loss
+            return 100 - (100 / (1 + rs))
+        
+        rsi = calculate_rsi()
+        
+        # Simple moving averages
+        sma20 = close_prices.rolling(window=20).mean()
+        sma50 = close_prices.rolling(window=50).mean()
+    
+    # Function to check if pattern is confirmed by the next candle
+    def is_pattern_confirmed(index, pattern_type):
+        """Check if pattern is confirmed by subsequent price action"""
+        if index + 1 >= n:  # Can't confirm patterns at the end of the data
+            return False
+            
+        # Simple confirmation rule: next candle follows the expected direction
+        if pattern_type == 'bullish':
+            return is_bullish.iloc[index + 1] and close_prices.iloc[index + 1] > close_prices.iloc[index]
+        elif pattern_type == 'bearish':
+            return is_bearish.iloc[index + 1] and close_prices.iloc[index + 1] < close_prices.iloc[index]
+        return False
+    
+    # Function to add pattern with metadata
+    def add_pattern(direction, index, pattern_name, base_strength, trend_quality=0.5):
+        # Skip patterns that are too small relative to volatility
+        if volatility_filter and candle_range.iloc[index] < atr.iloc[index] * min_pattern_size_pct:
+            return
+            
+        # Apply volume filter if enabled and volume data exists
+        if volume_filter and 'volume' in data.columns:
+            avg_volume = data['volume'].iloc[max(0, index-5):index].mean()
+            if data['volume'].iloc[index] < avg_volume * 0.8:
+                return
+        
+        # Calculate final pattern strength based on multiple factors
+        strength = base_strength
+        
+        # Adjust strength based on trend quality
+        strength *= trend_quality
+        
+        # Adjust strength based on pattern size relative to volatility
+        if volatility_filter and not np.isnan(atr.iloc[index]) and atr.iloc[index] > 0:
+            volatility_factor = min(1.5, candle_range.iloc[index] / atr.iloc[index])
+            strength *= volatility_factor
+            
+        # Adjust strength based on confirmation if required
+        if confirmation_required:
+            if index < n - 1:  # Not the last candle
+                # Check next candle confirmation
+                if is_pattern_confirmed(index, direction):
+                    strength *= 1.2  # Boost strength for confirmed patterns
+                else:
+                    strength *= 0.5  # Reduce strength for unconfirmed patterns
+                    
+                # Check technical indicator alignment
+                if not np.isnan(rsi.iloc[index]):
+                    if direction == 'bullish' and rsi.iloc[index] < 30:
+                        strength *= 1.2  # Bullish pattern in oversold condition
+                    elif direction == 'bearish' and rsi.iloc[index] > 70:
+                        strength *= 1.2  # Bearish pattern in overbought condition
+                        
+        # Cap strength at 1.0 and ensure it's at least 0.1
+        strength = max(0.1, min(1.0, strength))
+        
+        # Add pattern with full metadata
+        pattern_info = {
+            'index': index,
+            'pattern': pattern_name,
+            'strength': strength,
+            'price': close_prices.iloc[index],
+            'volume': data['volume'].iloc[index] if 'volume' in data.columns else None,
+            'time': data.index[index] if isinstance(data.index, pd.DatetimeIndex) else index,
+            'confirmed': is_pattern_confirmed(index, direction) if index < n - 1 else None
+        }
+        
+        patterns[direction].append(pattern_info)
+    
+    # Detect Hammer (bullish reversal pattern)
+    for i in range(min_trend_bars, n):
+        # Check for downtrend before pattern
+        if is_in_downtrend(i):
+            # Check for small body and long lower shadow
+            if (is_bullish.iloc[i] and
+                body_size_pct.iloc[i] < 0.3 and  # Small body
+                lower_shadow.iloc[i] > 2 * candle_body.iloc[i] and  # Long lower shadow
+                upper_shadow.iloc[i] < 0.3 * candle_body.iloc[i]):  # Very small upper shadow
+                
+                add_pattern('bullish', i, 'hammer', 0.7, trend_quality=0.8)
+    
+    # Detect Shooting Star (bearish reversal pattern)
+    for i in range(min_trend_bars, n):
+        # Check for uptrend before pattern
+        if is_in_uptrend(i):
+            # Check for small body and long upper shadow
+            if (is_bearish.iloc[i] and
+                body_size_pct.iloc[i] < 0.3 and  # Small body
+                upper_shadow.iloc[i] > 2 * candle_body.iloc[i] and  # Long upper shadow
+                lower_shadow.iloc[i] < 0.3 * candle_body.iloc[i]):  # Very small lower shadow
+                
+                add_pattern('bearish', i, 'shooting_star', 0.7, trend_quality=0.8)
+    
+    # Detect Engulfing Patterns
+    for i in range(1, n):
+        # Bullish Engulfing
+        if (is_bearish.iloc[i-1] and is_bullish.iloc[i] and  # Previous bearish, current bullish
+            open_prices.iloc[i] <= close_prices.iloc[i-1] and  # Current open below/at previous close
+            close_prices.iloc[i] >= open_prices.iloc[i-1]):  # Current close above/at previous open
+            
+            # Calculate trend quality (how strong was the preceding downtrend)
+            trend_quality = 0.5
+            if i >= min_trend_bars:
+                # Check how many of the previous bars were bearish
+                bearish_count = sum(is_bearish.iloc[max(0, i-min_trend_bars):i])
+                trend_quality = min(1.0, bearish_count / min_trend_bars + 0.3)
+            
+            add_pattern('bullish', i, 'bullish_engulfing', 0.8, trend_quality)
+            
+        # Bearish Engulfing
+        if (is_bullish.iloc[i-1] and is_bearish.iloc[i] and  # Previous bullish, current bearish
+            open_prices.iloc[i] >= close_prices.iloc[i-1] and  # Current open above/at previous close
+            close_prices.iloc[i] <= open_prices.iloc[i-1]):  # Current close below/at previous open
+            
+            # Calculate trend quality (how strong was the preceding uptrend)
+            trend_quality = 0.5
+            if i >= min_trend_bars:
+                # Check how many of the previous bars were bullish
+                bullish_count = sum(is_bullish.iloc[max(0, i-min_trend_bars):i])
+                trend_quality = min(1.0, bullish_count / min_trend_bars + 0.3)
+            
+            add_pattern('bearish', i, 'bearish_engulfing', 0.8, trend_quality)
+    
+    # Detect Doji (indecision pattern)
+    for i in range(n):
+        # Real doji has almost no body
+        body_thresh = 0.05  # Body must be less than 5% of the range
+        
+        # Body is very small relative to shadows
+        if (candle_body.iloc[i] < body_thresh * candle_range.iloc[i] and
+            candle_range.iloc[i] > 0):  # Ensure non-zero range
+            
+            # Long-legged Doji (significant shadows on both sides)
+            if (upper_shadow.iloc[i] > 0.3 * candle_range.iloc[i] and
+                lower_shadow.iloc[i] > 0.3 * candle_range.iloc[i]):
+                
+                # In downtrend, could be bullish reversal
+                if i >= min_trend_bars and is_in_downtrend(i):
+                    add_pattern('bullish', i, 'doji', 0.5, trend_quality=0.7)
+                # In uptrend, could be bearish reversal    
+                elif i >= min_trend_bars and is_in_uptrend(i):
+                    add_pattern('bearish', i, 'doji', 0.5, trend_quality=0.7)
+    
+    # Detect Morning Star (bullish reversal)
+    for i in range(2, n):
+        if (is_bearish.iloc[i-2] and  # First candle is bearish with significant body
+            candle_body.iloc[i-2] > atr.iloc[i-2] * 0.5 and  # First candle has significant body
+            candle_body.iloc[i-1] < 0.3 * candle_body.iloc[i-2] and  # Second candle has small body
+            is_bullish.iloc[i] and  # Third candle is bullish
+            candle_body.iloc[i] > atr.iloc[i] * 0.5 and  # Third candle has significant body
+            # Gap or near-gap between 1st and 2nd candles
+            max(open_prices.iloc[i-1], close_prices.iloc[i-1]) < close_prices.iloc[i-2] and
+            # Third candle closes well into first candle's body
+            close_prices.iloc[i] > (open_prices.iloc[i-2] + close_prices.iloc[i-2]) / 2):
+            
+            # Check for downtrend before the pattern
+            trend_quality = 0.5
+            if i >= min_trend_bars + 2:
+                # Check preceding bars for downtrend
+                if is_in_downtrend(i-2):
+                    trend_quality = 0.9
+            
+            add_pattern('bullish', i, 'morning_star', 0.9, trend_quality)
+    
+    # Detect Evening Star (bearish reversal)
+    for i in range(2, n):
+        if (is_bullish.iloc[i-2] and  # First candle is bullish with significant body
+            candle_body.iloc[i-2] > atr.iloc[i-2] * 0.5 and  # First candle has significant body
+            candle_body.iloc[i-1] < 0.3 * candle_body.iloc[i-2] and  # Second candle has small body
+            is_bearish.iloc[i] and  # Third candle is bearish
+            candle_body.iloc[i] > atr.iloc[i] * 0.5 and  # Third candle has significant body
+            # Gap or near-gap between 1st and 2nd candles
+            min(open_prices.iloc[i-1], close_prices.iloc[i-1]) > close_prices.iloc[i-2] and
+            # Third candle closes well into first candle's body
+            close_prices.iloc[i] < (open_prices.iloc[i-2] + close_prices.iloc[i-2]) / 2):
+            
+            # Check for uptrend before the pattern
+            trend_quality = 0.5
+            if i >= min_trend_bars + 2:
+                # Check preceding bars for uptrend
+                if is_in_uptrend(i-2):
+                    trend_quality = 0.9
+            
+            add_pattern('bearish', i, 'evening_star', 0.9, trend_quality)
+    
+    # Detect Hanging Man (bearish reversal)
+    for i in range(min_trend_bars, n):
+        # Check for uptrend
+        if is_in_uptrend(i):
+            # Look for small body and long lower shadow
+            if (body_size_pct.iloc[i] < 0.3 and  # Small body
+                lower_shadow.iloc[i] > 2 * candle_body.iloc[i] and  # Long lower shadow
+                upper_shadow.iloc[i] < 0.3 * candle_body.iloc[i]):  # Very small upper shadow
+                
+                add_pattern('bearish', i, 'hanging_man', 0.7, trend_quality=0.8)
+    
+    # Detect Three White Soldiers (bullish continuation)
+    for i in range(2, n):
+        if (is_bullish.iloc[i-2] and is_bullish.iloc[i-1] and is_bullish.iloc[i] and  # Three bullish candles
+            close_prices.iloc[i] > close_prices.iloc[i-1] > close_prices.iloc[i-2] and  # Each close higher
+            open_prices.iloc[i] > open_prices.iloc[i-1] > open_prices.iloc[i-2] and  # Each open higher
+            upper_shadow.iloc[i-2] < 0.2 * candle_body.iloc[i-2] and  # Small upper shadows
+            upper_shadow.iloc[i-1] < 0.2 * candle_body.iloc[i-1] and
+            upper_shadow.iloc[i] < 0.2 * candle_body.iloc[i] and
+            # Each body should be reasonable size
+            candle_body.iloc[i-2] > atr.iloc[i-2] * 0.5 and
+            candle_body.iloc[i-1] > atr.iloc[i-1] * 0.5 and
+            candle_body.iloc[i] > atr.iloc[i] * 0.5):
+            
+            # Check for prior consolidation or base pattern for better quality signal
+            trend_quality = 0.7  # Default quality
+            if i >= min_trend_bars + 2:
+                # Look for a base or consolidation pattern before the three soldiers
+                prior_range = high_prices.iloc[i-min_trend_bars:i-2].max() - low_prices.iloc[i-min_trend_bars:i-2].min()
+                current_range = close_prices.iloc[i] - close_prices.iloc[i-2]
+                
+                # If the soldiers are breaking out of a base pattern, higher quality
+                if current_range > prior_range * 0.5:
+                    trend_quality = 0.9
+            
+            add_pattern('bullish', i, 'three_white_soldiers', 0.9, trend_quality)
+    
+    # Detect Three Black Crows (bearish continuation)
+    for i in range(2, n):
+        if (is_bearish.iloc[i-2] and is_bearish.iloc[i-1] and is_bearish.iloc[i] and  # Three bearish candles
+            close_prices.iloc[i] < close_prices.iloc[i-1] < close_prices.iloc[i-2] and  # Each close lower
+            open_prices.iloc[i] < open_prices.iloc[i-1] < open_prices.iloc[i-2] and  # Each open lower
+            lower_shadow.iloc[i-2] < 0.2 * candle_body.iloc[i-2] and  # Small lower shadows
+            lower_shadow.iloc[i-1] < 0.2 * candle_body.iloc[i-1] and
+            lower_shadow.iloc[i] < 0.2 * candle_body.iloc[i] and
+            # Each body should be reasonable size
+            candle_body.iloc[i-2] > atr.iloc[i-2] * 0.5 and
+            candle_body.iloc[i-1] > atr.iloc[i-1] * 0.5 and
+            candle_body.iloc[i] > atr.iloc[i] * 0.5):
+            
+            # Check for prior consolidation or top pattern for better quality signal
+            trend_quality = 0.7  # Default quality
+            if i >= min_trend_bars + 2:
+                # Look for a top pattern before the three crows
+                prior_range = high_prices.iloc[i-min_trend_bars:i-2].max() - low_prices.iloc[i-min_trend_bars:i-2].min()
+                current_range = close_prices.iloc[i-2] - close_prices.iloc[i]
+                
+                # If the crows are breaking down from a top pattern, higher quality
+                if current_range > prior_range * 0.5:
+                    trend_quality = 0.9
+            
+            add_pattern('bearish', i, 'three_black_crows', 0.9, trend_quality)
+    
+    # Detect Piercing Line (bullish reversal)
+    for i in range(1, n):
+        if (is_bearish.iloc[i-1] and is_bullish.iloc[i] and  # Previous bearish, current bullish
+            open_prices.iloc[i] < close_prices.iloc[i-1] and  # Open below previous close
+            close_prices.iloc[i] > (open_prices.iloc[i-1] + close_prices.iloc[i-1]) / 2 and  # Close above midpoint
+            candle_body.iloc[i-1] > atr.iloc[i-1] * 0.5 and  # Previous candle has significant body
+            candle_body.iloc[i] > atr.iloc[i] * 0.5):  # Current candle has significant body
+            
+            # Check for downtrend before the pattern
+            trend_quality = 0.5
+            if i >= min_trend_bars + 1:
+                if is_in_downtrend(i-1):
+                    trend_quality = 0.8
+            
+            add_pattern('bullish', i, 'piercing_line', 0.7, trend_quality)
+    
+    # Detect Dark Cloud Cover (bearish reversal)
+    for i in range(1, n):
+        if (is_bullish.iloc[i-1] and is_bearish.iloc[i] and  # Previous bullish, current bearish
+            open_prices.iloc[i] > close_prices.iloc[i-1] and  # Open above previous close
+            close_prices.iloc[i] < (open_prices.iloc[i-1] + close_prices.iloc[i-1]) / 2 and  # Close below midpoint
+            candle_body.iloc[i-1] > atr.iloc[i-1] * 0.5 and  # Previous candle has significant body
+            candle_body.iloc[i] > atr.iloc[i] * 0.5):  # Current candle has significant body
+            
+            # Check for uptrend before the pattern
+            trend_quality = 0.5
+            if i >= min_trend_bars + 1:
+                if is_in_uptrend(i-1):
+                    trend_quality = 0.8
+            
+            add_pattern('bearish', i, 'dark_cloud_cover', 0.7, trend_quality)
+    
+    # Detect harami patterns (reversal patterns)
+    for i in range(1, n):
+        # Bullish Harami
+        if (is_bearish.iloc[i-1] and  # Previous bearish
+            is_bullish.iloc[i] and  # Current bullish
+            candle_body.iloc[i-1] > candle_body.iloc[i] * 2 and  # Previous body engulfs current
+            open_prices.iloc[i] > close_prices.iloc[i-1] and  # Current open above previous close
+            close_prices.iloc[i] < open_prices.iloc[i-1] and  # Current close below previous open
+            candle_body.iloc[i-1] > atr.iloc[i-1] * 0.5):  # Previous candle has significant body
+            
+            # Check for downtrend before the pattern
+            trend_quality = 0.5
+            if i >= min_trend_bars + 1:
+                if is_in_downtrend(i-1):
+                    trend_quality = 0.8
+            
+            add_pattern('bullish', i, 'bullish_harami', 0.6, trend_quality)
+            
+        # Bearish Harami
+        if (is_bullish.iloc[i-1] and  # Previous bullish
+            is_bearish.iloc[i] and  # Current bearish
+            candle_body.iloc[i-1] > candle_body.iloc[i] * 2 and  # Previous body engulfs current
+            open_prices.iloc[i] < close_prices.iloc[i-1] and  # Current open below previous close
+            close_prices.iloc[i] > open_prices.iloc[i-1] and  # Current close above previous open
+            candle_body.iloc[i-1] > atr.iloc[i-1] * 0.5):  # Previous candle has significant body
+            
+            # Check for uptrend before the pattern
+            trend_quality = 0.5
+            if i >= min_trend_bars + 1:
+                if is_in_uptrend(i-1):
+                    trend_quality = 0.8
+            
+            add_pattern('bearish', i, 'bearish_harami', 0.6, trend_quality)
+    
+    # Optionally filter out very weak patterns or reduce to top N strongest patterns
+    # This helps eliminate patterns that are technically valid but not tradable
+    min_strength_threshold = 0.3
+    
+    # Filter out weak patterns
+    patterns['bullish'] = [p for p in patterns['bullish'] if p['strength'] >= min_strength_threshold]
+    patterns['bearish'] = [p for p in patterns['bearish'] if p['strength'] >= min_strength_threshold]
+    
+    # Sort patterns by strength (descending)
+    patterns['bullish'] = sorted(patterns['bullish'], key=lambda x: x['strength'], reverse=True)
+    patterns['bearish'] = sorted(patterns['bearish'], key=lambda x: x['strength'], reverse=True)
+    
+    return patterns
 
 def calculate_macd(data, fast_period=12, slow_period=26, signal_period=9):
     """
